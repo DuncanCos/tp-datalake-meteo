@@ -349,18 +349,34 @@ function updateMap() {
   }
 }
 
+// la France entière tient toujours dans la carte : cadrage automatique,
+// aucune interaction de pan/zoom (dashboard fixe)
+const FRANCE_FIT = [[41.2, -5.4], [51.4, 9.9]];
+
+function fitFrance() {
+  if (map) map.fitBounds(FRANCE_FIT, { padding: [4, 4] });
+}
+
 function initMap() {
   map = L.map("map", {
+    zoomControl: false,
+    dragging: false,
     scrollWheelZoom: false,
-    // la carte reste cadrée sur la métropole : pas de pan vers l'étranger
-    maxBounds: [[40.6, -7.0], [52.0, 11.0]],
-    maxBoundsViscosity: 1.0,
-    minZoom: 5,
-  }).setView([46.6, 2.6], 6);
+    doubleClickZoom: false,
+    boxZoom: false,
+    keyboard: false,
+    touchZoom: false,
+    zoomSnap: 0.1, // zoom fractionnaire : cadrage exact sur l'hexagone
+    attributionControl: true,
+  });
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     attribution: "&copy; OpenStreetMap",
     maxZoom: 12,
   }).addTo(map);
+  fitFrance();
+  // recadre quand la fenêtre / la cellule de grille change de taille
+  new ResizeObserver(() => { map.invalidateSize(); fitFrance(); })
+    .observe(document.getElementById("map"));
   addFranceDecor();
 }
 
@@ -486,17 +502,18 @@ async function loadLive() {
     drawHeatOverlay();
   }
   document.getElementById("live-cards").innerHTML = data.map((v) => `
-    <div class="card">
-      <div class="ville">${v.city}
-        <span class="badge-rank">#${v.rang_misere_live} misère</span></div>
-      <div class="emoji">${emojiFor(v.weather_code)}</div>
-      <div class="temp">${v.temperature.toFixed(1)}°C</div>
-      <div class="detail">💨 ${(v.wind_speed_ms * 3.6).toFixed(0)} km/h ·
-        ☁️ ${v.cloud_cover_pct.toFixed(0)} % · 💧 ${v.humidity_pct.toFixed(0)} %</div>
+    <div class="live-row">
+      <span class="lr-emoji">${emojiFor(v.weather_code)}</span>
+      <span class="lr-main"><b>${v.city}</b>
+        <span class="lr-rank">#${v.rang_misere_live} misère</span>
+        <span class="lr-detail">💨 ${(v.wind_speed_ms * 3.6).toFixed(0)} km/h ·
+          ☁️ ${v.cloud_cover_pct.toFixed(0)} % · 💧 ${v.humidity_pct.toFixed(0)} %</span></span>
+      <span class="lr-right">
+        <span class="lr-temp">${v.temperature.toFixed(1)}°</span>
+        <span class="lr-score" style="color:${meterColor(v.grisaille_live)}">
+          ${v.grisaille_live.toFixed(0)}/100 ${mood(v.grisaille_live)}</span></span>
       <div class="meter"><div style="width:${v.grisaille_live}%;
         background:${meterColor(v.grisaille_live)}"></div></div>
-      <div class="score" style="color:${meterColor(v.grisaille_live)}">
-        grisaille ${v.grisaille_live.toFixed(0)}/100 — ${mood(v.grisaille_live)}</div>
     </div>`).join("");
 }
 
@@ -607,14 +624,16 @@ async function loadChart() {
       responsive: true,
       maintainAspectRatio: false,
       interaction: { mode: "index", intersect: false },
+      layout: { padding: { top: 14 } },
       scales: {
-        y: { min: 0, max: 100,
-             title: { display: true, text: "indice grisaille" },
+        y: { min: 0, max: 100, ticks: { font: { size: 9 } },
              grid: { color: "#eceae4" } },
-        x: { grid: { display: false } },
+        x: { grid: { display: false }, ticks: { font: { size: 9 }, maxTicksLimit: 15 } },
       },
       plugins: {
-        legend: { position: "top", labels: { font: { family: "'Baloo 2'", weight: 700 } } },
+        legend: { position: "right",
+                  labels: { font: { family: "'Baloo 2'", size: 10, weight: 700 },
+                            boxWidth: 10, boxHeight: 10 } },
         tooltip: { backgroundColor: "#14355c" },
       },
     },
@@ -631,48 +650,17 @@ function reliabilityBadge(mae) {
 async function loadReliability() {
   const rel = await (await fetch("/api/reliability")).json();
   if (!rel.length) return; // tables pas encore construites : section masquée
-  const hist = await (await fetch("/api/live_vs_official?days=14")).json();
   document.getElementById("reliability-section").style.display = "";
   document.getElementById("reliability-cards").innerHTML = rel.map((v) => {
     const b = reliabilityBadge(v.mae_temp);
-    return `<div class="card">
-      <div class="ville">${v.city}
-        <span class="badge-rank">${b.ico} ${b.txt}</span></div>
-      <div class="detail">🌡️ écart moyen ${v.mae_temp}°C
-        (biais ${v.biais_temp > 0 ? "+" : ""}${v.biais_temp}°C)<br>
-        ☔ écart moyen ${v.mae_precip ?? "–"} mm ·
-        📅 ${v.n_jours_compares} j comparés</div>
-      <div class="rel-chart"><canvas id="rel-${v.city}"></canvas></div>
+    return `<div class="rel-row">
+      <span>${v.city}
+        <span class="lr-detail">🌡️ ±${v.mae_temp}°C
+          (biais ${v.biais_temp > 0 ? "+" : ""}${v.biais_temp}°) ·
+          ☔ ±${v.mae_precip ?? "–"} mm · ${v.n_jours_compares} j</span></span>
+      <span class="rel-badge">${b.ico} ${b.txt}</span>
     </div>`;
   }).join("");
-  for (const v of rel) {
-    const rows = hist.filter((r) => r.city === v.city);
-    if (!rows.length) continue;
-    new Chart(document.getElementById(`rel-${v.city}`), {
-      type: "bar",
-      data: {
-        labels: rows.map((r) => r.obs_day.slice(5, 10)),
-        datasets: [{
-          data: rows.map((r) => r.ecart_temp),
-          backgroundColor: rows.map((r) =>
-            Math.abs(r.ecart_temp ?? 0) < 1 ? "#1baf7a" : "#eb6834"),
-        }],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: { display: false },
-          tooltip: { callbacks: {
-            label: (c) => `écart ${c.raw > 0 ? "+" : ""}${c.raw}°C` } },
-        },
-        scales: {
-          y: { ticks: { font: { size: 9 } }, grid: { color: "#eceae4" } },
-          x: { display: false },
-        },
-      },
-    });
-  }
 }
 
 /* ── épisodes ──────────────────────────────────────────── */

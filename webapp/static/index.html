@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="style.css?v=4">
+  <link rel="stylesheet" href="style.css?v=6">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
@@ -19,16 +19,13 @@
     <div class="cloud c3">🌥️</div>
   </div>
 
-  <header>
-    <h1>La Météo Grisaille</h1>
-    <p class="tagline">Le grand match officiel de la ville la plus déprimante de France 🏆🌧️</p>
-  </header>
-
-  <main>
-    <!-- ═══════════ CARTE ═══════════ -->
-    <section>
-      <h2>🗺️ La carte de France en direct <span id="live-time" class="soustitre"></span></h2>
-      <p class="explain">L'indice grisaille en direct : 0 = ciel radieux 😎, 100 = misère absolue 🫠 — clique sur une ville !</p>
+  <div class="dash">
+    <!-- ═══════════ BANDEAU ═══════════ -->
+    <header class="dash-header">
+      <div class="brand">
+        <h1>La Météo Grisaille</h1>
+        <span class="tagline">le grand match de la ville la plus déprimante 🏆🌧️</span>
+      </div>
       <div class="time-controls">
         <button id="btn-live" class="time-chip active">🔴 En direct</button>
         <select id="year-pick" class="time-nav"></select>
@@ -36,56 +33,52 @@
         <input type="date" id="day-pick">
         <button id="day-next" class="time-nav">▶</button>
         <input type="range" id="day-slider" min="0" max="0" value="0">
+        <span id="live-time" class="soustitre"></span>
       </div>
-      <div id="layer-chips" class="layer-chips"></div>
-      <div class="map-wrap">
-        <div id="map" class="map-card"></div>
-        <div id="map-legend" class="map-legend"></div>
-      </div>
-    </section>
+    </header>
 
-    <!-- ═══════════ EN DIRECT ═══════════ -->
-    <section>
-      <h2>🔴 Le détail ville par ville</h2>
-      <div id="live-cards" class="cards"></div>
-    </section>
+    <!-- ═══════════ GRILLE ═══════════ -->
+    <main class="dash-grid">
 
-    <!-- ═══════════ FIABILITÉ DU LIVE ═══════════ -->
-    <section id="reliability-section" style="display:none">
-      <h2>🎯 Le live dit-il vrai ?</h2>
-      <p class="explain">Le flux Open-Meteo agrégé au jour, confronté à l'observation officielle
-        Météo-France horaire (convention journée climatologique)</p>
-      <div id="reliability-cards" class="cards"></div>
-    </section>
+      <!-- colonne gauche : podium + épisodes -->
+      <aside class="panel">
+        <h2>🏆 Podium de la misère <span id="ranking-month" class="soustitre"></span></h2>
+        <div id="podium-chips" class="layer-chips"></div>
+        <div id="podium" class="podium"></div>
+        <div id="ranking-rest" class="ranking-rest"></div>
+        <h2 class="panel-next">⚡ Derniers épisodes</h2>
+        <div id="episodes" class="episodes"></div>
+      </aside>
 
-    <!-- ═══════════ PODIUM ═══════════ -->
-    <section>
-      <h2>🏆 Le podium de la misère <span id="ranking-month" class="soustitre"></span></h2>
-      <div id="podium-chips" class="layer-chips" style="margin-top:8px"></div>
-      <div id="podium" class="podium"></div>
-      <div id="ranking-rest" class="ranking-rest"></div>
-    </section>
+      <!-- centre : carte + courbe -->
+      <section class="map-cell">
+        <div id="layer-chips" class="layer-chips"></div>
+        <div class="map-wrap">
+          <div id="map"></div>
+          <div id="map-legend" class="map-legend"></div>
+        </div>
+        <div class="chart-strip">
+          <span class="chart-title">📈 Le match des extrêmes — 30 jours</span>
+          <canvas id="chart"></canvas>
+        </div>
+      </section>
 
-    <!-- ═══════════ COURBE ═══════════ -->
-    <section>
-      <h2>📈 Le match des extrêmes — 30 derniers jours</h2>
-      <p class="explain">Indice grisaille quotidien (source officielle Météo-France)</p>
-      <div class="chart-card"><canvas id="chart"></canvas></div>
-    </section>
+      <!-- colonne droite : en direct + fiabilité -->
+      <aside class="panel">
+        <h2>🔴 Le détail ville par ville</h2>
+        <div id="live-cards" class="live-list"></div>
+        <div id="reliability-section" style="display:none">
+          <h2 class="panel-next">🎯 Le live dit-il vrai ?</h2>
+          <div id="reliability-cards" class="rel-list"></div>
+        </div>
+        <p class="credits">Bronze→Silver→Gold · Kafka · Spark · HDFS · Airflow<br>
+          données <a href="https://meteo.data.gouv.fr">Météo-France</a> &amp;
+          <a href="https://open-meteo.com">Open-Meteo</a></p>
+      </aside>
 
-    <!-- ═══════════ ÉPISODES ═══════════ -->
-    <section>
-      <h2>⚡ Les derniers épisodes météo</h2>
-      <div id="episodes" class="episodes"></div>
-    </section>
-  </main>
+    </main>
+  </div>
 
-  <footer>
-    Datalake Bronze → Silver → Gold · Kafka · Spark · HDFS · Airflow —
-    données <a href="https://meteo.data.gouv.fr">Météo-France</a> &amp;
-    <a href="https://open-meteo.com">Open-Meteo</a>
-  </footer>
-
-  <script src="app.js?v=5"></script>
+  <script src="app.js?v=6"></script>
 </body>
 </html>
