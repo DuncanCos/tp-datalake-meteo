@@ -36,6 +36,26 @@ function mood(score) {
   return "🫠 misère totale";
 }
 
+/* ── ciel animé ────────────────────────────────────────── */
+// reflète la grisaille moyenne de la France sur le ciel décoratif
+const SKY_CLASSES = ["sky-soleil", "sky-nuageux", "sky-gris", "sky-misere"];
+
+function updateSky() {
+  const sky = document.querySelector(".sky");
+  if (!sky) return;
+  const scores = (mode === "live"
+    ? lastLive.map((v) => v.grisaille_live)
+    : dayData.map((v) => v.grisaille))
+    .filter((s) => s != null && !Number.isNaN(s));
+  sky.classList.remove(...SKY_CLASSES);
+  if (!scores.length) return; // pas de donnée : apparence par défaut
+  const moy = scores.reduce((a, b) => a + b, 0) / scores.length;
+  if (moy < 25) sky.classList.add("sky-soleil");
+  else if (moy < 45) sky.classList.add("sky-nuageux");
+  else if (moy < 65) sky.classList.add("sky-gris");
+  else sky.classList.add("sky-misere");
+}
+
 /* ── carte de France ───────────────────────────────────── */
 const CITY_COORDS = {
   Paris: [48.8566, 2.3522], Lyon: [45.764, 4.8357], Marseille: [43.2965, 5.3698],
@@ -385,6 +405,9 @@ function initMap() {
 // l'annee se choisit dans le menu deroulant
 let currentYear = "";
 let yearDates = [];
+let currentDay = "";    // journee affichee en mode "date" ("" en live)
+let dayReq = 0;         // jeton anti-course : invalide les setDay() en vol
+let sliderTimer = null; // debounce du slider (annule par setLive)
 
 function datesForYear(y) { return allDates.filter((d) => d.startsWith(y)); }
 
@@ -403,7 +426,12 @@ async function setDay(date) {
   const y = date.slice(0, 4);
   if (y !== currentYear) setYear(y);
   mode = "date";
-  dayData = await (await fetch(`/api/day?date=${date}`)).json();
+  currentDay = date;
+  const req = ++dayReq;
+  const data = await (await fetch(`/api/day?date=${date}`)).json();
+  // un setLive() ou un autre setDay() est passé entre-temps : on abandonne
+  if (req !== dayReq || mode !== "date") return;
+  dayData = data;
   // grille SIM2 : quotidienne (fenêtre ~60 j), sinon mensuelle, sinon IDW
   gridCells = []; gridMode = null;
   try {
@@ -415,6 +443,7 @@ async function setDay(date) {
       if (gm.cells?.length) { gridCells = gm.cells; gridMode = "monthly"; }
     }
   } catch { /* pas de grille -> l'IDW 10 villes prend le relais */ }
+  if (req !== dayReq || mode !== "date") return; // idem après les fetchs grille
   document.getElementById("btn-live").classList.remove("active");
   document.getElementById("day-pick").value = date;
   document.getElementById("day-slider").value = yearDates.indexOf(date);
@@ -422,6 +451,8 @@ async function setDay(date) {
   renderLayerChips();
   updateMap();
   drawHeatOverlay();
+  renderCityPanel(); // le panneau droit suit la journée choisie
+  updateSky();
 }
 
 let liveUpdatedAt = 0;
@@ -441,11 +472,22 @@ function liveLabel() {
 
 function setLive() {
   mode = "live";
+  currentDay = "";
+  dayReq++;                  // invalide tout setDay() encore en vol
+  clearTimeout(sliderTimer); // un glissement en attente ne doit pas nous ramener en mode date
+  if (allDates.length) {
+    // état live propre : dernière année, slider en fin de course, champ date vide
+    setYear(allDates[allDates.length - 1].slice(0, 4));
+    document.getElementById("day-slider").value = yearDates.length - 1;
+    document.getElementById("day-pick").value = "";
+  }
   document.getElementById("btn-live").classList.add("active");
   document.getElementById("live-time").textContent = liveLabel();
   renderLayerChips();
   updateMap();
   drawHeatOverlay();
+  renderCityPanel(); // retour au direct dans le panneau droit aussi
+  updateSky();
 }
 
 async function initTimeControls() {
@@ -467,10 +509,13 @@ async function initTimeControls() {
     setDay(yearDates[0]); // on atterrit au 1er jour de l'annee choisie
   });
   pick.addEventListener("change", () => {
-    if (allDates.includes(pick.value)) setDay(pick.value);
+    // garde-fous : valeur vide (retour en live), date inconnue,
+    // ou journée déjà affichée (change déclenché au blur)
+    if (!pick.value || !allDates.includes(pick.value)) return;
+    if (mode === "date" && pick.value === currentDay) return;
+    setDay(pick.value);
   });
   // debounce : pas une requete par pixel pendant le glissement
-  let sliderTimer = null;
   slider.addEventListener("input", () => {
     const date = yearDates[slider.value];
     document.getElementById("live-time").textContent = `· journée du ${date}`;
@@ -489,19 +534,15 @@ async function initTimeControls() {
   });
 }
 
-/* ── en direct ─────────────────────────────────────────── */
-async function loadLive() {
-  const payload = await (await fetch("/api/live")).json();
-  const data = payload.villes || [];
-  if (!data.length) return;
-  lastLive = data;
-  liveUpdatedAt = payload.updated_at || 0;
+/* ── panneau droit : détail ville par ville ────────────── */
+// piloté par le mode temporel : live Open-Meteo ou journée d'archive
+function renderCityPanel() {
+  const title = document.getElementById("cities-title");
+  const el = document.getElementById("live-cards");
+
   if (mode === "live") {
-    document.getElementById("live-time").textContent = liveLabel();
-    updateMap();
-    drawHeatOverlay();
-  }
-  document.getElementById("live-cards").innerHTML = data.map((v) => `
+    title.textContent = "🔴 Le détail ville par ville";
+    el.innerHTML = lastLive.map((v) => `
     <div class="live-row">
       <span class="lr-emoji">${emojiFor(v.weather_code)}</span>
       <span class="lr-main"><b>${v.city}</b>
@@ -515,6 +556,52 @@ async function loadLive() {
       <div class="meter"><div style="width:${v.grisaille_live}%;
         background:${meterColor(v.grisaille_live)}"></div></div>
     </div>`).join("");
+    return;
+  }
+
+  // mode date : la journée choisie, réduite aux 10 villes phares de la carte,
+  // classée de la plus misérable à la plus épargnée (rang recalculé sur les 10)
+  const villes = dayData
+    .filter((v) => CITY_COORDS[v.city])
+    .sort((a, b) => (b.grisaille ?? -1) - (a.grisaille ?? -1));
+  const date = (villes[0]?.obs_date ?? "").slice(0, 10);
+  title.textContent = date ? `📅 Le détail du ${date}` : "📅 Le détail du jour";
+  const fmt = (x, f = 0) => (x == null ? "–" : x.toFixed(f));
+  el.innerHTML = villes.map((v, i) => {
+    const score = v.grisaille ?? 0, color = meterColor(score);
+    // héliomètre absent certains jours : on se rabat sur l'humidité
+    const soleil = v.sunshine_min != null
+      ? `☀️ ${fmt(v.sunshine_min)} min` : `💧 ${fmt(v.humidity_pct)} %`;
+    return `
+    <div class="live-row">
+      <span class="lr-emoji">${emojiForDaily(v)}</span>
+      <span class="lr-main"><b>${v.city}</b>
+        <span class="lr-rank">#${i + 1} misère</span>
+        <span class="lr-detail">🌡️ ${fmt(v.temp_min)} / ${fmt(v.temp_max)}° ·
+          ☔ ${fmt(v.precip_mm, 1)} mm · ${soleil}</span></span>
+      <span class="lr-right">
+        <span class="lr-temp">${fmt(v.temp_avg, 1)}°</span>
+        <span class="lr-score" style="color:${color}">
+          ${fmt(score)}/100 ${mood(score)}</span></span>
+      <div class="meter"><div style="width:${score}%;background:${color}"></div></div>
+    </div>`;
+  }).join("");
+}
+
+/* ── en direct ─────────────────────────────────────────── */
+async function loadLive() {
+  const payload = await (await fetch("/api/live")).json();
+  const data = payload.villes || [];
+  if (!data.length) return;
+  lastLive = data;
+  liveUpdatedAt = payload.updated_at || 0;
+  if (mode === "live") {
+    document.getElementById("live-time").textContent = liveLabel();
+    updateMap();
+    drawHeatOverlay();
+    renderCityPanel(); // on n'écrase le panneau que si on est bien en direct
+    updateSky();
+  }
 }
 
 /* ── podium ────────────────────────────────────────────── */
