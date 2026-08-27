@@ -34,7 +34,9 @@ query = (
     .option("path", BRONZE_PATH)
     .option("checkpointLocation", CHECKPOINT_PATH)
     .partitionBy("ingest_date")
-    .trigger(processingTime="60 seconds")
+    # 5 min par micro-batch : 5x moins de petits fichiers HDFS qu'a 60 s,
+    # sans impact visible (le Silver ne tourne que toutes les 15 min)
+    .trigger(processingTime="300 seconds")
     .start()
 )
 

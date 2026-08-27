@@ -18,6 +18,9 @@ from airflow.exceptions import AirflowSkipException
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOperator
 
+# volontairement limite aux 10 departements des villes du flux Open-Meteo :
+# la confrontation live vs officiel n'a besoin que d'eux, et un snapshot
+# quotidien des 95 fichiers horaires pese ~1,5 Go/jour pour rien
 DEPTS = ["75", "69", "13", "31", "06", "44", "67", "33", "59", "35"]
 PERIOD = "latest-2025-2026"
 

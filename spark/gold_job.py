@@ -22,10 +22,35 @@ HDFS = "hdfs://namenode:8020"
 SILVER = f"{HDFS}/datalake/silver/observations"
 GOLD = f"{HDFS}/datalake/gold"
 
+# prefecture de chaque departement metropolitain (la Corse est "20" dans les
+# fichiers climatologiques Meteo-France, pas 2A/2B)
 CITIES = {
-    "75": "Paris", "69": "Lyon", "13": "Marseille", "31": "Toulouse",
-    "06": "Nice", "44": "Nantes", "67": "Strasbourg", "33": "Bordeaux",
-    "59": "Lille", "35": "Rennes",
+    "01": "Bourg-en-Bresse", "02": "Laon", "03": "Moulins",
+    "04": "Digne-les-Bains", "05": "Gap", "06": "Nice", "07": "Privas",
+    "08": "Charleville-Mézières", "09": "Foix", "10": "Troyes",
+    "11": "Carcassonne", "12": "Rodez", "13": "Marseille", "14": "Caen",
+    "15": "Aurillac", "16": "Angoulême", "17": "La Rochelle", "18": "Bourges",
+    "19": "Tulle", "20": "Ajaccio", "21": "Dijon", "22": "Saint-Brieuc",
+    "23": "Guéret", "24": "Périgueux", "25": "Besançon", "26": "Valence",
+    "27": "Évreux", "28": "Chartres", "29": "Quimper", "30": "Nîmes",
+    "31": "Toulouse", "32": "Auch", "33": "Bordeaux", "34": "Montpellier",
+    "35": "Rennes", "36": "Châteauroux", "37": "Tours", "38": "Grenoble",
+    "39": "Lons-le-Saunier", "40": "Mont-de-Marsan", "41": "Blois",
+    "42": "Saint-Étienne", "43": "Le Puy-en-Velay", "44": "Nantes",
+    "45": "Orléans", "46": "Cahors", "47": "Agen", "48": "Mende",
+    "49": "Angers", "50": "Saint-Lô", "51": "Châlons-en-Champagne",
+    "52": "Chaumont", "53": "Laval", "54": "Nancy", "55": "Bar-le-Duc",
+    "56": "Vannes", "57": "Metz", "58": "Nevers", "59": "Lille",
+    "60": "Beauvais", "61": "Alençon", "62": "Arras",
+    "63": "Clermont-Ferrand", "64": "Pau", "65": "Tarbes",
+    "66": "Perpignan", "67": "Strasbourg", "68": "Colmar", "69": "Lyon",
+    "70": "Vesoul", "71": "Mâcon", "72": "Le Mans", "73": "Chambéry",
+    "74": "Annecy", "75": "Paris", "76": "Rouen", "77": "Melun",
+    "78": "Versailles", "79": "Niort", "80": "Amiens", "81": "Albi",
+    "82": "Montauban", "83": "Toulon", "84": "Avignon",
+    "85": "La Roche-sur-Yon", "86": "Poitiers", "87": "Limoges",
+    "88": "Épinal", "89": "Auxerre", "90": "Belfort", "91": "Évry",
+    "92": "Nanterre", "93": "Bobigny", "94": "Créteil", "95": "Pontoise",
 }
 
 # ponderations de l'indice
@@ -204,6 +229,14 @@ def build_live(silver):
 
 
 def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    # live : seulement live_status (cycle 15 min) ; full : toutes les tables
+    # (les donnees Meteo-France ne changent qu'une fois par jour)
+    parser.add_argument("--scope", default="full", choices=["live", "full"])
+    args = parser.parse_args()
+
     spark = (
         SparkSession.builder.appName("gold-grisaille")
         .config("spark.sql.sources.partitionOverwriteMode", "dynamic")
@@ -213,22 +246,30 @@ def main() -> None:
 
     silver = spark.read.parquet(SILVER)
 
-    daily = build_daily(silver).cache()
-    # repartition par annee : 1 fichier par partition au lieu de milliers de
-    # petits fichiers (200 shuffle partitions x ~130 annees)
-    daily.repartition("year").write.mode("overwrite") \
-        .partitionBy("year").parquet(f"{GOLD}/grisaille_daily")
-    build_ranking(daily).coalesce(1).write.mode("overwrite") \
-        .parquet(f"{GOLD}/grisaille_ranking")
-    build_podiums(daily).coalesce(1).write.mode("overwrite") \
-        .parquet(f"{GOLD}/grisaille_podiums")
-    detect_episodes(daily).coalesce(1).write.mode("overwrite") \
-        .parquet(f"{GOLD}/episodes")
     build_live(silver).coalesce(1).write.mode("overwrite") \
         .parquet(f"{GOLD}/live_status")
+    tables = ["live_status"]
 
-    for name in ["grisaille_daily", "grisaille_ranking", "grisaille_podiums",
-                 "episodes", "live_status"]:
+    if args.scope == "full":
+        daily = build_daily(silver).cache()
+        # repartition par annee : 1 fichier par partition au lieu de milliers de
+        # petits fichiers (200 shuffle partitions x ~130 annees)
+        daily.repartition("year").write.mode("overwrite") \
+            .partitionBy("year").parquet(f"{GOLD}/grisaille_daily")
+        build_ranking(daily).coalesce(1).write.mode("overwrite") \
+            .parquet(f"{GOLD}/grisaille_ranking")
+        build_podiums(daily).coalesce(1).write.mode("overwrite") \
+            .parquet(f"{GOLD}/grisaille_podiums")
+        detect_episodes(daily).coalesce(1).write.mode("overwrite") \
+            .parquet(f"{GOLD}/episodes")
+        # liste des journees disponibles : evite a la webapp de relire toute
+        # grisaille_daily juste pour alimenter le selecteur de dates
+        daily.select("obs_date").distinct().coalesce(1).write.mode("overwrite") \
+            .parquet(f"{GOLD}/grisaille_dates")
+        tables += ["grisaille_daily", "grisaille_ranking", "grisaille_podiums",
+                   "episodes", "grisaille_dates"]
+
+    for name in tables:
         n = spark.read.parquet(f"{GOLD}/{name}").count()
         print(f"gold {name}: {n} lignes")
     spark.stop()

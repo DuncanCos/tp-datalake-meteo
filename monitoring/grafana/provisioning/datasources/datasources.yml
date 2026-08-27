@@ -1,13 +1,24 @@
 apiVersion: 1
 
+# les datasources d'origine ont ete creees sans uid (stockees dans le volume
+# grafana_data) : on les supprime pour les recreer avec un uid stable, que le
+# dashboard provisionne reference
+deleteDatasources:
+  - name: Prometheus
+    orgId: 1
+  - name: Loki
+    orgId: 1
+
 datasources:
   - name: Prometheus
+    uid: prometheus
     type: prometheus
     access: proxy
     url: http://prometheus:9090
     isDefault: true
 
   - name: Loki
+    uid: loki
     type: loki
     access: proxy
     url: http://loki:3100

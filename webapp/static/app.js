@@ -544,9 +544,14 @@ function renderPodium() {
       <div class="detail" style="font-size:.75rem">🌡️ ${v.temp_moy}°C · ${pluie}</div>
     </div><div class="socle">${v.rang_misere === 1 ? "1ᵉʳ" : v.rang_misere + "ᵉ"}</div></div>`;
   }).join("");
-  document.getElementById("ranking-rest").innerHTML = villes.slice(3).map((v) =>
+  // France entière : on n'affiche que le haut du classement après le podium
+  const REST_MAX = 12;
+  const rest = villes.slice(3, 3 + REST_MAX);
+  const others = villes.length - 3 - rest.length;
+  document.getElementById("ranking-rest").innerHTML = rest.map((v) =>
     `<span class="chip">#${v.rang_misere} ${v.city} — ${v.grisaille_moy}</span>`
-  ).join("");
+  ).join("") + (others > 0
+    ? `<span class="chip">… et ${others} autres départements au soleil</span>` : "");
 }
 
 async function loadRanking() {

@@ -128,8 +128,14 @@ def podiums():
 
 @app.get("/api/dates")
 def dates():
-    """Liste des journees disponibles dans grisaille_daily (cache long)."""
-    df = read_gold("grisaille_daily", ttl=1800)
+    """Liste des journees disponibles (cache long).
+
+    Lit la petite table dediee grisaille_dates ecrite par le job Gold ;
+    repli sur un scan complet de grisaille_daily si elle n'existe pas encore.
+    """
+    df = read_gold("grisaille_dates", ttl=1800)
+    if df.empty:
+        df = read_gold("grisaille_daily", ttl=1800)
     if df.empty:
         return []
     return sorted(pd.to_datetime(df["obs_date"]).dt.strftime("%Y-%m-%d").unique().tolist())

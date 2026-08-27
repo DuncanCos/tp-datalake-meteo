@@ -10,6 +10,11 @@
   overwrite : rejouer le job est idempotent.
 
 Args : --date-debut / --date-fin (YYYY-MM-DD, optionnels) filtrent obs_date.
+       --sources openmeteo|meteofrance|all : quelles sources retraiter.
+       Le cycle 15 min ne retraite que le flux openmeteo (leger) ; le batch
+       quotidien retraite tout. L'ecriture etant en dynamic partition
+       overwrite par (source, year, month), traiter une seule source ne
+       touche jamais les partitions de l'autre.
 """
 import argparse
 
@@ -139,6 +144,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--date-debut", default="")
     parser.add_argument("--date-fin", default="")
+    parser.add_argument("--sources", default="all",
+                        choices=["openmeteo", "meteofrance", "all"])
     args = parser.parse_args()
 
     spark = (
@@ -148,7 +155,14 @@ def main() -> None:
     )
     spark.sparkContext.setLogLevel("WARN")
 
-    silver = build_meteofrance(spark).unionByName(build_openmeteo(spark))
+    parts = []
+    if args.sources in ("meteofrance", "all"):
+        parts.append(build_meteofrance(spark))
+    if args.sources in ("openmeteo", "all"):
+        parts.append(build_openmeteo(spark))
+    silver = parts[0]
+    for p in parts[1:]:
+        silver = silver.unionByName(p)
 
     if args.date_debut:
         silver = silver.filter(F.col("obs_date") >= F.lit(args.date_debut))

@@ -1,9 +1,13 @@
 """DAG Silver : normalisation Bronze -> Parquet (modele commun).
 
-Declenche automatiquement par le DAG d'ingestion batch (TriggerDagRun),
-ou manuellement avec les params date_debut / date_fin pour ne (re)traiter
-qu'une plage de dates. Le job Spark ecrit en dynamic partition overwrite :
-relancer ne duplique jamais les donnees.
+Deux modes selon les params (dynamic partition overwrite : toujours idempotent) :
+  - cycle planifie 15 min (defauts) : sources=openmeteo, scope=live -> ne
+    retraite que le flux temps reel (leger) et Gold ne reconstruit que
+    live_status ;
+  - declenche par l'ingestion batch (ou manuellement) : sources=all,
+    scope=full -> retraite aussi Meteo-France et Gold reconstruit toutes
+    les tables. Les donnees officielles ne changent qu'une fois par jour,
+    inutile de re-broyer ~70 ans d'historique toutes les 15 minutes.
 """
 from __future__ import annotations
 
@@ -21,7 +25,8 @@ from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOpe
     start_date=pendulum.datetime(2026, 8, 1, tz="Europe/Paris"),
     catchup=False,
     max_active_runs=1,
-    params={"date_debut": "", "date_fin": ""},
+    params={"date_debut": "", "date_fin": "", "sources": "openmeteo",
+            "scope": "live"},
     tags=["silver", "spark"],
     doc_md=__doc__,
 )
@@ -38,14 +43,16 @@ def silver_observations():
         application_args=[
             "--date-debut", "{{ params.date_debut }}",
             "--date-fin", "{{ params.date_fin }}",
+            "--sources", "{{ params.sources }}",
         ],
         verbose=False,
     )
 
-    # dependance explicite entre couches : Silver -> Gold
+    # dependance explicite entre couches : Silver -> Gold (meme scope)
     trigger_gold = TriggerDagRunOperator(
         task_id="trigger_gold",
         trigger_dag_id="gold_grisaille",
+        conf={"scope": "{{ params.scope }}"},
     )
     build_silver >> trigger_gold
 

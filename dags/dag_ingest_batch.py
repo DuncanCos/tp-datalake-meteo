@@ -23,7 +23,9 @@ from airflow.decorators import dag, task
 from airflow.exceptions import AirflowSkipException
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 
-DEPTS = ["75", "69", "13", "31", "06", "44", "67", "33", "59", "35"]
+# toute la metropole : 01..95, la Corse etant le seul departement "20" dans
+# les fichiers climatologiques Meteo-France (pas de 2A/2B)
+DEPTS = [f"{i:02d}" for i in range(1, 96)]
 FAMILIES = ["RR-T-Vent", "autres-parametres"]
 
 BASE_URL = "https://meteofrance.s3.sbg.io.cloud.ovh.net/data/synchro_ftp/BASE/QUOT"
@@ -115,6 +117,10 @@ def ingest_batch_meteofrance():
         conf={
             "date_debut": "{{ params.date_debut }}",
             "date_fin": "{{ params.date_fin }}",
+            # apres une ingestion batch : retraiter Meteo-France et
+            # reconstruire toutes les tables Gold (pas seulement le live)
+            "sources": "all",
+            "scope": "full",
         },
     )
     lots >> trigger_silver
