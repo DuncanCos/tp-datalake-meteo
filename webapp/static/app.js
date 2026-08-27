@@ -63,10 +63,12 @@ const HEAT_LAYERS = {
     getLive: (v) => v.wind_speed_ms * 3.6, getDaily: (v) => v.wind_ms * 3.6 },
   humidite: { label: "💧 Humidité", unit: "%", colors: ["#f5faff", "#1c5cab"],
     getLive: (v) => v.humidity_pct, getDaily: (v) => v.humidity_pct },
-  pluie: { label: "☔ Pluie", unit: "mm", colors: ["#f5faff", "#256abf"],
-    getLive: null, getDaily: (v) => v.precip_mm },
-  soleil: { label: "☀️ Soleil", unit: "min", gridUnit: " J/cm²", colors: ["#8a8f99", "#ffd75e"],
-    getLive: null, getDaily: (v) => v.sunshine_min },
+  pluie: { label: "☔ Pluie", unit: "mm", liveUnit: " mm/h", colors: ["#f5faff", "#256abf"],
+    getLive: (v) => v.precipitation_mm, getDaily: (v) => v.precip_mm },
+  soleil: { label: "☀️ Soleil", unit: "min", liveUnit: " %", gridUnit: " J/cm²",
+    colors: ["#8a8f99", "#ffd75e"],
+    // en direct : pas d'héliomètre -> part de ciel dégagé (inverse nébulosité)
+    getLive: (v) => 100 - v.cloud_cover_pct, getDaily: (v) => v.sunshine_min },
   nuages: { label: "☁️ Nuages", unit: "%", colors: ["#ffffff", "#5a6b7d"],
     getLive: (v) => v.cloud_cover_pct, getDaily: null },
   grisaille: { label: "🫠 Grisaille", unit: "/100", colors: ["#eaf6ea", "#4a3aa7"],
@@ -93,6 +95,53 @@ function gridGet(layerKey) {
 
 // emprise France metropolitaine
 const HEAT_BOUNDS = { south: 41.2, north: 51.4, west: -5.6, east: 10.0 };
+
+/* contour France (metropole simplifiée, servie en local) : masque le reste
+   du monde sur la carte et découpe les heatmaps aux frontières */
+let francePolys = []; // liste d'anneaux [[lon, lat], ...]
+
+async function loadFrance() {
+  try {
+    const geo = await (await fetch("france.geojson")).json();
+    const geom = geo.type === "Feature" ? geo.geometry : geo.features[0].geometry;
+    const polys = geom.type === "Polygon" ? [geom.coordinates] : geom.coordinates;
+    francePolys = polys.flat(); // tous les anneaux (continent, Corse, îles)
+    if (map) addFranceDecor();
+    drawHeatOverlay(); // re-découpe l'overlay déjà affiché
+  } catch { /* pas de contour -> carte non masquée, tout marche quand même */ }
+}
+
+function addFranceDecor() {
+  if (!francePolys.length || map._franceDecor) return;
+  map._franceDecor = true;
+  const rings = francePolys.map((ring) => ring.map(([lon, lat]) => [lat, lon]));
+  // monde entier avec la France en trous -> l'étranger est estompé
+  const world = [[70, -30], [70, 30], [25, 30], [25, -30]];
+  L.polygon([world, ...rings], {
+    stroke: false, fillColor: "#dfeefc", fillOpacity: 0.78, interactive: false,
+  }).addTo(map);
+  L.polygon(rings, {
+    color: "#14355c", weight: 1.5, opacity: 0.55, fill: false, interactive: false,
+  }).addTo(map);
+}
+
+function clipToFrance(ctx, W, H) {
+  if (!francePolys.length) return;
+  const yMercF = (lat) => Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360));
+  const yN = yMercF(HEAT_BOUNDS.north), yS = yMercF(HEAT_BOUNDS.south);
+  ctx.globalCompositeOperation = "destination-in";
+  ctx.beginPath();
+  for (const ring of francePolys) {
+    ring.forEach(([lon, lat], i) => {
+      const x = ((lon - HEAT_BOUNDS.west) / (HEAT_BOUNDS.east - HEAT_BOUNDS.west)) * W;
+      const y = ((yMercF(lat) - yN) / (yS - yN)) * H;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.closePath();
+  }
+  ctx.fill();
+  ctx.globalCompositeOperation = "source-over";
+}
 
 function lerpColor(colors, t) {
   const n = colors.length - 1;
@@ -156,16 +205,18 @@ function drawHeatOverlay() {
     }
   }
   ctx.putImageData(img, 0, 0);
+  clipToFrance(ctx, W, H);
 
   const bounds = [[HEAT_BOUNDS.south, HEAT_BOUNDS.west], [HEAT_BOUNDS.north, HEAT_BOUNDS.east]];
   const url = canvas.toDataURL();
   if (heatOverlay) heatOverlay.setUrl(url);
   else heatOverlay = L.imageOverlay(url, bounds, { opacity: 0.85, interactive: false }).addTo(map);
 
+  const unit = mode === "live" ? (layer.liveUnit ?? layer.unit) : layer.unit;
   document.getElementById("map-legend").innerHTML = `
     <div>${layer.label}</div>
     <div class="bar" style="background:linear-gradient(90deg,${layer.colors.join(",")})"></div>
-    <div class="ends"><span>${vmin.toFixed(0)}${layer.unit}</span><span>${vmax.toFixed(0)}${layer.unit}</span></div>
+    <div class="ends"><span>${vmin.toFixed(0)}${unit}</span><span>${vmax.toFixed(0)}${unit}</span></div>
     <div class="src">interpolation 10 villes</div>`;
 }
 
@@ -207,6 +258,7 @@ function drawGridOverlay() {
     const y0 = py(p.lat + DLAT / 2), y1 = py(p.lat - DLAT / 2);
     ctx.fillRect(x0, y0, Math.ceil(x1 - x0) + 1, Math.ceil(y1 - y0) + 1);
   }
+  clipToFrance(ctx, W, H);
 
   const bounds = [[HEAT_BOUNDS.south, HEAT_BOUNDS.west], [HEAT_BOUNDS.north, HEAT_BOUNDS.east]];
   const url = canvas.toDataURL();
@@ -298,11 +350,18 @@ function updateMap() {
 }
 
 function initMap() {
-  map = L.map("map", { scrollWheelZoom: false }).setView([46.6, 2.6], 6);
+  map = L.map("map", {
+    scrollWheelZoom: false,
+    // la carte reste cadrée sur la métropole : pas de pan vers l'étranger
+    maxBounds: [[40.6, -7.0], [52.0, 11.0]],
+    maxBoundsViscosity: 1.0,
+    minZoom: 5,
+  }).setView([46.6, 2.6], 6);
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     attribution: "&copy; OpenStreetMap",
     maxZoom: 12,
   }).addTo(map);
+  addFranceDecor();
 }
 
 /* ── controles temporels ───────────────────────────────── */
@@ -644,6 +703,7 @@ async function loadEpisodes() {
 }
 
 renderLayerChips();
+loadFrance();
 loadLive();
 initTimeControls();
 loadRanking();
