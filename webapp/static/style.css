@@ -1,6 +1,8 @@
 /* ── La Météo Grisaille — style "météo de Gulli" ─────────────────── */
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+html { background: #8fd0ff; }
+
 body {
   font-family: "Baloo 2", "Comic Sans MS", cursive, sans-serif;
   background: linear-gradient(180deg, #4db3ff 0%, #8fd0ff 35%, #d9f0ff 70%, #fff8e7 100%);
@@ -148,6 +150,12 @@ h2 { font-size: 1.6rem; font-weight: 800; color: #14355c; }
   box-shadow: 0 10px 22px rgba(0,0,0,.08); height: 380px;
 }
 
+/* fiabilité du live */
+.rel-chart { height: 90px; margin-top: 8px; }
+
+/* légende : source de la heatmap (grille SIM2 ou IDW) */
+.map-legend .src { font-size: .68rem; color: #6b87a3; margin-top: 3px; font-weight: 600; }
+
 /* épisodes */
 .episodes { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
 .episode {
@@ -160,6 +168,12 @@ h2 { font-size: 1.6rem; font-weight: 800; color: #14355c; }
 .episode.vent   { border-left-color: #eb6834; }
 .episode .eico  { font-size: 1.5rem; }
 .episode .edet  { font-size: .85rem; color: #55708c; font-weight: 600; }
+.vig-badge {
+  font-size: .75rem; border-radius: 10px; padding: 2px 8px; font-weight: 800;
+  white-space: nowrap; margin-left: 4px;
+}
+.vig-badge.ok { background: #d9f3e4; color: #0c7a4d; }
+.vig-badge.ko { background: #fde3dc; color: #a03a1d; }
 
 footer {
   position: relative; z-index: 1; text-align: center; padding: 18px;

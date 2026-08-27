@@ -76,6 +76,13 @@ def build_daily(silver):
     city_map = F.create_map(*[F.lit(x) for kv in CITIES.items() for x in kv])
     daily = daily.withColumn("city", city_map[F.col("dept")])
 
+    # avant ~1950 la moyenne horaire TM n'existe pas : repli (TN+TX)/2,
+    # sinon la composante froid tombe a 0 et Paris -24 degC (1879) score 12/100
+    daily = daily.withColumn(
+        "temp_avg",
+        F.coalesce(F.col("temp_avg"), (F.col("temp_min") + F.col("temp_max")) / 2),
+    )
+
     daily = (
         daily
         .withColumn("c_froid", clamp01((F.lit(TEMP_CONFORT) - F.col("temp_avg"))
@@ -104,6 +111,34 @@ def build_ranking(daily):
     )
     w = Window.partitionBy("year", "month").orderBy(F.desc("grisaille_moy"))
     return monthly.withColumn("rang_misere", F.rank().over(w))
+
+
+def build_podiums(daily):
+    """Classements multi-periodes : mois courant, annee courante, 5 et 10 ans."""
+    mx = daily.agg(F.max("obs_date").alias("m")).first()["m"]
+    y, m = mx.year, mx.month
+    periods = [
+        ("mois", f"{y}-{m:02d}", (F.col("year") == y) & (F.col("month") == m)),
+        ("annee", str(y), F.col("year") == y),
+        ("5ans", f"{y - 4}-{y}", F.col("year") >= y - 4),
+        ("10ans", f"{y - 9}-{y}", F.col("year") >= y - 9),
+    ]
+    out = None
+    for ptype, label, cond in periods:
+        g = (
+            daily.filter(cond).groupBy("dept", "city")
+            .agg(
+                F.round(F.avg("grisaille"), 1).alias("grisaille_moy"),
+                F.round(F.avg("temp_avg"), 1).alias("temp_moy"),
+                F.round(F.sum("precip_mm"), 1).alias("precip_cumul_mm"),
+                F.count("*").alias("n_jours"),
+            )
+            .withColumn("period_type", F.lit(ptype))
+            .withColumn("period_label", F.lit(label))
+        )
+        out = g if out is None else out.unionByName(g)
+    w = Window.partitionBy("period_type").orderBy(F.desc("grisaille_moy"))
+    return out.withColumn("rang_misere", F.rank().over(w))
 
 
 def detect_episodes(daily):
@@ -179,12 +214,21 @@ def main() -> None:
     silver = spark.read.parquet(SILVER)
 
     daily = build_daily(silver).cache()
-    daily.write.mode("overwrite").partitionBy("year").parquet(f"{GOLD}/grisaille_daily")
-    build_ranking(daily).write.mode("overwrite").parquet(f"{GOLD}/grisaille_ranking")
-    detect_episodes(daily).write.mode("overwrite").parquet(f"{GOLD}/episodes")
-    build_live(silver).write.mode("overwrite").parquet(f"{GOLD}/live_status")
+    # repartition par annee : 1 fichier par partition au lieu de milliers de
+    # petits fichiers (200 shuffle partitions x ~130 annees)
+    daily.repartition("year").write.mode("overwrite") \
+        .partitionBy("year").parquet(f"{GOLD}/grisaille_daily")
+    build_ranking(daily).coalesce(1).write.mode("overwrite") \
+        .parquet(f"{GOLD}/grisaille_ranking")
+    build_podiums(daily).coalesce(1).write.mode("overwrite") \
+        .parquet(f"{GOLD}/grisaille_podiums")
+    detect_episodes(daily).coalesce(1).write.mode("overwrite") \
+        .parquet(f"{GOLD}/episodes")
+    build_live(silver).coalesce(1).write.mode("overwrite") \
+        .parquet(f"{GOLD}/live_status")
 
-    for name in ["grisaille_daily", "grisaille_ranking", "episodes", "live_status"]:
+    for name in ["grisaille_daily", "grisaille_ranking", "grisaille_podiums",
+                 "episodes", "live_status"]:
         n = spark.read.parquet(f"{GOLD}/{name}").count()
         print(f"gold {name}: {n} lignes")
     spark.stop()

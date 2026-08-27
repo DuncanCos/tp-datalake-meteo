@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=4">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
@@ -50,9 +50,18 @@
       <div id="live-cards" class="cards"></div>
     </section>
 
+    <!-- ═══════════ FIABILITÉ DU LIVE ═══════════ -->
+    <section id="reliability-section" style="display:none">
+      <h2>🎯 Le live dit-il vrai ?</h2>
+      <p class="explain">Le flux Open-Meteo agrégé au jour, confronté à l'observation officielle
+        Météo-France horaire (convention journée climatologique)</p>
+      <div id="reliability-cards" class="cards"></div>
+    </section>
+
     <!-- ═══════════ PODIUM ═══════════ -->
     <section>
       <h2>🏆 Le podium de la misère <span id="ranking-month" class="soustitre"></span></h2>
+      <div id="podium-chips" class="layer-chips" style="margin-top:8px"></div>
       <div id="podium" class="podium"></div>
       <div id="ranking-rest" class="ranking-rest"></div>
     </section>
@@ -77,6 +86,6 @@
     <a href="https://open-meteo.com">Open-Meteo</a>
   </footer>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=4"></script>
 </body>
 </html>

@@ -89,6 +89,9 @@ def ingest_batch_meteofrance():
 
         filename = f"Q_{dept}_{period}_{family}.csv.gz"
         resp = requests.get(f"{BASE_URL}/{filename}", stream=True, timeout=600)
+        if resp.status_code == 404:
+            # toutes les periodes n'existent pas pour tous les departements
+            raise AirflowSkipException(f"fichier absent chez Meteo-France : {filename}")
         resp.raise_for_status()
 
         client.write(

@@ -65,7 +65,7 @@ const HEAT_LAYERS = {
     getLive: (v) => v.humidity_pct, getDaily: (v) => v.humidity_pct },
   pluie: { label: "☔ Pluie", unit: "mm", colors: ["#f5faff", "#256abf"],
     getLive: null, getDaily: (v) => v.precip_mm },
-  soleil: { label: "☀️ Soleil", unit: "min", colors: ["#8a8f99", "#ffd75e"],
+  soleil: { label: "☀️ Soleil", unit: "min", gridUnit: " J/cm²", colors: ["#8a8f99", "#ffd75e"],
     getLive: null, getDaily: (v) => v.sunshine_min },
   nuages: { label: "☁️ Nuages", unit: "%", colors: ["#ffffff", "#5a6b7d"],
     getLive: (v) => v.cloud_cover_pct, getDaily: null },
@@ -73,6 +73,23 @@ const HEAT_LAYERS = {
     getLive: (v) => v.grisaille_live, getDaily: (v) => v.grisaille },
 };
 let currentHeat = "temp";
+
+/* grille SIM2 Météo-France (mailles SAFRAN agrégées à 16 km) : quand la
+   journée affichée est couverte, elle remplace l'interpolation IDW.
+   cells = [lat, lon, temp, precip mm, vent m/s, humidité %, ssi J/cm², grisaille] */
+let gridCells = [];
+let gridMode = null; // "daily" (indice complet) | "monthly" (partiel) | null
+
+const GRID_IDX = { temp: 2, pluie: 3, vent: 4, humidite: 5, soleil: 6, grisaille: 7 };
+const GRID_MONTHLY_KEYS = ["temp", "pluie", "grisaille"];
+
+function gridGet(layerKey) {
+  const idx = GRID_IDX[layerKey];
+  if (idx == null) return null;
+  if (gridMode === "monthly" && !GRID_MONTHLY_KEYS.includes(layerKey)) return null;
+  const conv = layerKey === "vent" ? 3.6 : 1; // m/s -> km/h
+  return (c) => (c[idx] == null ? null : c[idx] * conv);
+}
 
 // emprise France metropolitaine
 const HEAT_BOUNDS = { south: 41.2, north: 51.4, west: -5.6, east: 10.0 };
@@ -87,6 +104,8 @@ function lerpColor(colors, t) {
 }
 
 function drawHeatOverlay() {
+  // journée couverte par la grille SIM2 -> vraies mailles, pas d'IDW
+  if (mode !== "live" && gridCells.length) { drawGridOverlay(); return; }
   const data = currentData();
   if (!map || !data.length) return;
   const layer = HEAT_LAYERS[currentHeat];
@@ -146,13 +165,72 @@ function drawHeatOverlay() {
   document.getElementById("map-legend").innerHTML = `
     <div>${layer.label}</div>
     <div class="bar" style="background:linear-gradient(90deg,${layer.colors.join(",")})"></div>
-    <div class="ends"><span>${vmin.toFixed(0)}${layer.unit}</span><span>${vmax.toFixed(0)}${layer.unit}</span></div>`;
+    <div class="ends"><span>${vmin.toFixed(0)}${layer.unit}</span><span>${vmax.toFixed(0)}${layer.unit}</span></div>
+    <div class="src">interpolation 10 villes</div>`;
+}
+
+function drawGridOverlay() {
+  if (!map) return;
+  const layer = HEAT_LAYERS[currentHeat];
+  const get = gridGet(currentHeat);
+  if (!get) return;
+  const pts = gridCells
+    .map((c) => ({ lat: c[0], lon: c[1], val: get(c) }))
+    .filter((p) => p.lat != null && p.val != null && !Number.isNaN(p.val));
+  if (!pts.length) return;
+
+  const vals = pts.map((p) => p.val);
+  let vmin = Math.min(...vals), vmax = Math.max(...vals);
+  const pad = Math.max((vmax - vmin) * 0.05, 0.5);
+  const positive = Math.min(...vals) >= 0;
+  vmin -= pad; vmax += pad;
+  if (positive) vmin = Math.max(0, vmin);
+
+  // résolution doublée par rapport à l'IDW : les cellules 16 km sont nettes
+  const W = 480, H = 600;
+  const canvas = document.createElement("canvas");
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext("2d");
+
+  const yMerc = (lat) => Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360));
+  const yN = yMerc(HEAT_BOUNDS.north), yS = yMerc(HEAT_BOUNDS.south);
+  const px = (lon) => ((lon - HEAT_BOUNDS.west) / (HEAT_BOUNDS.east - HEAT_BOUNDS.west)) * W;
+  const py = (lat) => ((yMerc(lat) - yN) / (yS - yN)) * H;
+
+  const DLAT = 0.144; // ~16 km en degrés de latitude
+  for (const p of pts) {
+    const t = Math.max(0, Math.min(1, (p.val - vmin) / (vmax - vmin)));
+    const [r, g, b] = lerpColor(layer.colors, t);
+    ctx.fillStyle = `rgba(${r},${g},${b},0.62)`;
+    const dLon = DLAT / Math.cos((p.lat * Math.PI) / 180);
+    const x0 = px(p.lon - dLon / 2), x1 = px(p.lon + dLon / 2);
+    const y0 = py(p.lat + DLAT / 2), y1 = py(p.lat - DLAT / 2);
+    ctx.fillRect(x0, y0, Math.ceil(x1 - x0) + 1, Math.ceil(y1 - y0) + 1);
+  }
+
+  const bounds = [[HEAT_BOUNDS.south, HEAT_BOUNDS.west], [HEAT_BOUNDS.north, HEAT_BOUNDS.east]];
+  const url = canvas.toDataURL();
+  if (heatOverlay) heatOverlay.setUrl(url);
+  else heatOverlay = L.imageOverlay(url, bounds, { opacity: 0.85, interactive: false }).addTo(map);
+
+  const unit = layer.gridUnit ?? layer.unit;
+  const label = gridMode === "monthly" && currentHeat === "grisaille"
+    ? "🫠 Grisaille partielle" : layer.label;
+  document.getElementById("map-legend").innerHTML = `
+    <div>${label}</div>
+    <div class="bar" style="background:linear-gradient(90deg,${layer.colors.join(",")})"></div>
+    <div class="ends"><span>${vmin.toFixed(0)}${unit}</span><span>${vmax.toFixed(0)}${unit}</span></div>
+    <div class="src">grille SIM2 Météo-France · 16 km</div>`;
 }
 
 function renderLayerChips() {
   const el = document.getElementById("layer-chips");
   const avail = Object.entries(HEAT_LAYERS)
-    .filter(([, l]) => (mode === "live" ? l.getLive : l.getDaily));
+    .filter(([k, l]) => {
+      if (mode === "live") return l.getLive;
+      if (gridCells.length) return gridGet(k);
+      return l.getDaily;
+    });
   if (!avail.some(([k]) => k === currentHeat)) currentHeat = "temp";
   el.innerHTML = avail.map(([k, l]) =>
     `<button class="layer-chip${k === currentHeat ? " active" : ""}" data-layer="${k}">${l.label}</button>`
@@ -251,6 +329,17 @@ async function setDay(date) {
   if (y !== currentYear) setYear(y);
   mode = "date";
   dayData = await (await fetch(`/api/day?date=${date}`)).json();
+  // grille SIM2 : quotidienne (fenêtre ~60 j), sinon mensuelle, sinon IDW
+  gridCells = []; gridMode = null;
+  try {
+    const g = await (await fetch(`/api/grid?date=${date}`)).json();
+    if (g.cells?.length) { gridCells = g.cells; gridMode = "daily"; }
+    else {
+      const m = parseInt(date.slice(5, 7), 10);
+      const gm = await (await fetch(`/api/grid_month?year=${y}&month=${m}`)).json();
+      if (gm.cells?.length) { gridCells = gm.cells; gridMode = "monthly"; }
+    }
+  } catch { /* pas de grille -> l'IDW 10 villes prend le relais */ }
   document.getElementById("btn-live").classList.remove("active");
   document.getElementById("day-pick").value = date;
   document.getElementById("day-slider").value = yearDates.indexOf(date);
@@ -356,29 +445,66 @@ async function loadLive() {
 const MOIS = ["", "janvier", "février", "mars", "avril", "mai", "juin", "juillet",
   "août", "septembre", "octobre", "novembre", "décembre"];
 
-async function loadRanking() {
-  const data = await (await fetch("/api/ranking")).json();
+const PODIUM_TYPES = {
+  mois: "📅 Le mois",
+  annee: "📆 L'année",
+  "5ans": "🕔 Sur 5 ans",
+  "10ans": "🕙 Sur 10 ans",
+};
+let podiumsData = {};
+let currentPodium = "mois";
+
+function podiumLabel(ptype, label) {
+  if (ptype === "mois") {
+    const [y, m] = label.split("-");
+    return `· ${MOIS[parseInt(m, 10)]} ${y}`;
+  }
+  return `· ${label}`;
+}
+
+function renderPodium() {
+  const data = podiumsData[currentPodium];
+  if (!data) return;
   const villes = data.villes;
-  if (!villes || !villes.length) return;
   document.getElementById("ranking-month").textContent =
-    `· ${MOIS[data.month]} ${data.year}`;
+    podiumLabel(currentPodium, data.label);
   const medailles = ["🥇", "🥈", "🥉"];
   const ordre = [1, 0, 2]; // 2e, 1er, 3e pour un vrai podium
   const cls = ["p2", "p1", "p3"];
   document.getElementById("podium").innerHTML = ordre.map((i, k) => {
     const v = villes[i];
     if (!v) return "";
+    // au mois : cumul de pluie ; sur une periode longue : moyenne annuelle
+    const pluie = currentPodium === "mois"
+      ? `☔ ${v.precip_cumul_mm} mm`
+      : `☔ ${Math.round(v.precip_cumul_mm / Math.max(v.n_jours / 365.25, 1e-6))} mm/an`;
     return `<div class="step ${cls[k]}"><div class="box">
       <div class="medaille">${medailles[i]}</div>
       <div class="nom">${v.city}</div>
       <div class="sc">${v.grisaille_moy}/100</div>
-      <div class="detail" style="font-size:.75rem">🌡️ ${v.temp_moy}°C ·
-        ☔ ${v.precip_cumul_mm} mm</div>
+      <div class="detail" style="font-size:.75rem">🌡️ ${v.temp_moy}°C · ${pluie}</div>
     </div><div class="socle">${v.rang_misere === 1 ? "1ᵉʳ" : v.rang_misere + "ᵉ"}</div></div>`;
   }).join("");
   document.getElementById("ranking-rest").innerHTML = villes.slice(3).map((v) =>
     `<span class="chip">#${v.rang_misere} ${v.city} — ${v.grisaille_moy}</span>`
   ).join("");
+}
+
+async function loadRanking() {
+  podiumsData = await (await fetch("/api/podiums")).json();
+  const avail = Object.keys(PODIUM_TYPES).filter((t) => podiumsData[t]);
+  if (!avail.length) return;
+  if (!avail.includes(currentPodium)) currentPodium = avail[0];
+  const el = document.getElementById("podium-chips");
+  el.innerHTML = avail.map((t) =>
+    `<button class="layer-chip${t === currentPodium ? " active" : ""}"
+      data-podium="${t}">${PODIUM_TYPES[t]}</button>`).join("");
+  el.querySelectorAll(".layer-chip").forEach((btn) => btn.addEventListener("click", () => {
+    currentPodium = btn.dataset.podium;
+    el.querySelectorAll(".layer-chip").forEach((b) => b.classList.toggle("active", b === btn));
+    renderPodium();
+  }));
+  renderPodium();
 }
 
 /* ── courbe 30 jours ───────────────────────────────────── */
@@ -431,6 +557,60 @@ async function loadChart() {
   });
 }
 
+/* ── fiabilité du live (live vs officiel) ──────────────── */
+function reliabilityBadge(mae) {
+  if (mae < 0.5) return { ico: "🟢", txt: "fiable" };
+  if (mae < 1.5) return { ico: "🟠", txt: "correct" };
+  return { ico: "🔴", txt: "douteux" };
+}
+
+async function loadReliability() {
+  const rel = await (await fetch("/api/reliability")).json();
+  if (!rel.length) return; // tables pas encore construites : section masquée
+  const hist = await (await fetch("/api/live_vs_official?days=14")).json();
+  document.getElementById("reliability-section").style.display = "";
+  document.getElementById("reliability-cards").innerHTML = rel.map((v) => {
+    const b = reliabilityBadge(v.mae_temp);
+    return `<div class="card">
+      <div class="ville">${v.city}
+        <span class="badge-rank">${b.ico} ${b.txt}</span></div>
+      <div class="detail">🌡️ écart moyen ${v.mae_temp}°C
+        (biais ${v.biais_temp > 0 ? "+" : ""}${v.biais_temp}°C)<br>
+        ☔ écart moyen ${v.mae_precip ?? "–"} mm ·
+        📅 ${v.n_jours_compares} j comparés</div>
+      <div class="rel-chart"><canvas id="rel-${v.city}"></canvas></div>
+    </div>`;
+  }).join("");
+  for (const v of rel) {
+    const rows = hist.filter((r) => r.city === v.city);
+    if (!rows.length) continue;
+    new Chart(document.getElementById(`rel-${v.city}`), {
+      type: "bar",
+      data: {
+        labels: rows.map((r) => r.obs_day.slice(5, 10)),
+        datasets: [{
+          data: rows.map((r) => r.ecart_temp),
+          backgroundColor: rows.map((r) =>
+            Math.abs(r.ecart_temp ?? 0) < 1 ? "#1baf7a" : "#eb6834"),
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: {
+            label: (c) => `écart ${c.raw > 0 ? "+" : ""}${c.raw}°C` } },
+        },
+        scales: {
+          y: { ticks: { font: { size: 9 } }, grid: { color: "#eceae4" } },
+          x: { display: false },
+        },
+      },
+    });
+  }
+}
+
 /* ── épisodes ──────────────────────────────────────────── */
 const EP_STYLE = {
   vague_de_froid: { cls: "froid", ico: "🥶", nom: "Vague de froid",
@@ -441,6 +621,17 @@ const EP_STYLE = {
     det: (e) => `rafales ${(e.intensite * 3.6).toFixed(0)} km/h` },
 };
 
+// croisement avec les archives de vigilance Meteo-France (si disponible)
+function vigBadge(e) {
+  if (e.statut === "confirme") {
+    const taux = Math.round((e.taux_recouvrement ?? 0) * 100);
+    return `<span class="vig-badge ok">✔ vigilance ${e.couleur_max ?? ""} (${taux} %)</span>`;
+  }
+  if (e.statut === "non_confirme")
+    return `<span class="vig-badge ko">✖ non vu par la vigilance</span>`;
+  return ""; // hors_archive (avant fin 2022) ou table pas encore croisée
+}
+
 async function loadEpisodes() {
   const data = await (await fetch("/api/episodes?limit=12")).json();
   document.getElementById("episodes").innerHTML = data.map((e) => {
@@ -448,7 +639,7 @@ async function loadEpisodes() {
     return `<div class="episode ${s.cls}"><span class="eico">${s.ico}</span>
       <span>${s.nom} à <b>${e.city}</b>
         <span class="edet">du ${e.date_debut} au ${e.date_fin}
-        (${e.duree_jours} j) — ${s.det(e)}</span></span></div>`;
+        (${e.duree_jours} j) — ${s.det(e)}</span> ${vigBadge(e)}</span></div>`;
   }).join("");
 }
 
@@ -458,6 +649,7 @@ initTimeControls();
 loadRanking();
 loadChart();
 loadEpisodes();
+loadReliability();
 setInterval(loadLive, 60_000);
 // le "il y a X min" vieillit meme sans nouvelle donnee
 setInterval(() => {

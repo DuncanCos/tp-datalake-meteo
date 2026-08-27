@@ -161,7 +161,10 @@ def main() -> None:
         .withColumn("month", F.month("obs_date"))
     )
 
-    silver.write.mode("overwrite").partitionBy("source", "year", "month").parquet(SILVER_OUT)
+    # repartition sur les colonnes de partitionnement : 1 fichier par partition
+    # (sinon chaque tache de shuffle ecrit un mini-fichier dans chaque partition)
+    silver.repartition("source", "year", "month").write.mode("overwrite") \
+        .partitionBy("source", "year", "month").parquet(SILVER_OUT)
 
     counts = spark.read.parquet(SILVER_OUT).groupBy("source").count().collect()
     for row in counts:

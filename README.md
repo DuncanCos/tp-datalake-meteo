@@ -11,6 +11,14 @@ Restitution : un site web style « météo de Gulli » avec carte de France inte
 heatmaps (chaleur, vent, pluie, humidité, soleil, grisaille), voyage dans le temps
 jour par jour, podium mensuel de la misère et détection d'épisodes météo.
 
+S'y ajoutent trois confrontations aux références officielles :
+- **heatmap sur vraie grille** : les analyses SIM2 (SAFRAN, maille 8 km depuis 1958)
+  remplacent l'interpolation à 10 points quand la journée est couverte ;
+- **« le live dit-il vrai ? »** : le flux Open-Meteo agrégé au jour est comparé aux
+  observations horaires officielles Météo-France (MAE/biais par ville) ;
+- **épisodes vs vigilances** : chaque épisode détecté est croisé avec les archives
+  de vigilance (badge « confirmé » avec taux de recouvrement).
+
 ## Architecture
 
 ```
@@ -41,6 +49,21 @@ meteo.data.gouv.fr (CSV.gz) ──DAG Airflow──>  BRONZE (HDFS, brut, _SUCCE
 - **Dépendances explicites** : ingestion batch → Silver → Gold via
   `TriggerDagRunOperator` ; Silver tourne aussi toutes les 15 min pour rafraîchir
   le « en direct ».
+- **Chaînes quotidiennes séparées** (hors cycle 15 min) :
+  - `ingest_sim` (10h30) → `sim_silver_gold` : grilles SIM2 mensuelles (depuis
+    1958, backfill : param `annee_debut=1958`) et quotidiennes (60 j glissants)
+    → tables `grisaille_grid_daily` / `grisaille_grid_monthly` (cellules 16 km) ;
+  - `ingest_hourly_meteofrance` (07h20) : horaires officiels `latest` snapshotés
+    → `silver/observations_hourly` ;
+  - `ingest_vigilance` (07h00) : 1 carte de vigilance par jour (archive depuis le
+    2022-11-28, backfill : param `date_debut=2022-11-28`) → `silver/vigilance` ;
+  - les deux dernières déclenchent le DAG `confrontation` → tables
+    `live_vs_official`, `live_reliability` (convention journée climatologique
+    Météo-France : pluie 06h→06h UTC affectée à J, le pas 00h au jour précédent)
+    et `episodes_vigilance`. NB : la comparaison live vs officiel ne retient que
+    les journées complètes des deux côtés (≥ 80 quarts d'heure Open-Meteo,
+    ≥ 20 h officielles) — le panneau « le live dit-il vrai ? » se remplit donc
+    à partir du lendemain du premier jour entier de flux.
 
 ## Démarrage
 
@@ -80,8 +103,8 @@ des fichiers-période couvrant la plage).
 ├── docker-compose.yml     # 18 conteneurs : data stack + observabilité + site
 ├── docker/                # images custom (Airflow+Spark, producteur, webapp) + conf HDFS
 ├── producer/              # poll Open-Meteo -> Kafka (10 villes, 30 s)
-├── dags/                  # ingest batch (idempotent) -> silver -> gold
-├── spark/                 # streaming_bronze, silver_job, gold_job (+ scripts de verif)
+├── dags/                  # ingest batch/horaire/sim/vigilance -> silver -> gold
+├── spark/                 # streaming_bronze, jobs silver/gold + sim, confrontation, vigilance
 ├── webapp/                # API FastAPI (lit Gold via WebHDFS) + frontend carte/heatmap
 ├── monitoring/            # conf Prometheus, provisioning Grafana, Promtail
 ├── exploration/           # analyse exploratoire des sources + rapport
