@@ -1,0 +1,14 @@
+# donnees locales / echantillons
+data_sample/
+logs/
+
+# python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.venv/
+
+# spark / airflow
+spark-warehouse/
+airflow.cfg
+*.log

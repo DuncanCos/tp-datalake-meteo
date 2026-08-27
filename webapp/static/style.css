@@ -1,0 +1,172 @@
+/* ── La Météo Grisaille — style "météo de Gulli" ─────────────────── */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: "Baloo 2", "Comic Sans MS", cursive, sans-serif;
+  background: linear-gradient(180deg, #4db3ff 0%, #8fd0ff 35%, #d9f0ff 70%, #fff8e7 100%);
+  min-height: 100vh;
+  color: #21324b;
+  overflow-x: hidden;
+}
+
+/* ciel animé */
+.sky { position: fixed; inset: 0; pointer-events: none; z-index: 0; }
+.sun {
+  position: absolute; top: 24px; right: 6vw; font-size: 72px;
+  animation: spin 40s linear infinite; filter: drop-shadow(0 0 24px #ffd75e);
+}
+.cloud { position: absolute; font-size: 58px; opacity: .9; }
+.c1 { top: 60px;  animation: drift 55s linear infinite; }
+.c2 { top: 140px; font-size: 42px; animation: drift 75s linear infinite -30s; }
+.c3 { top: 30px;  font-size: 48px; animation: drift 95s linear infinite -60s; }
+@keyframes drift { from { left: -120px; } to { left: 105vw; } }
+@keyframes spin  { to { transform: rotate(360deg); } }
+
+header { position: relative; z-index: 1; text-align: center; padding: 42px 16px 10px; }
+h1 {
+  font-size: clamp(2.2rem, 6vw, 3.8rem); font-weight: 800; color: #fff;
+  text-shadow: 0 3px 0 #2a78d6, 0 6px 14px rgba(0,0,0,.25);
+  letter-spacing: 1px;
+}
+.tagline { font-size: 1.15rem; font-weight: 700; color: #1f4c7a; margin-top: 6px; }
+
+main { position: relative; z-index: 1; max-width: 1080px; margin: 0 auto; padding: 12px 18px 40px; }
+section { margin-top: 34px; }
+h2 { font-size: 1.6rem; font-weight: 800; color: #14355c; }
+.soustitre { font-size: 1rem; font-weight: 700; color: #4b6e94; }
+.explain { color: #38546f; font-weight: 500; margin: 2px 0 12px; }
+
+/* cartes live */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 14px; }
+.card {
+  background: #ffffffee; border-radius: 22px; padding: 14px 16px;
+  box-shadow: 0 6px 0 rgba(42,120,214,.18), 0 10px 22px rgba(0,0,0,.08);
+  border: 3px solid #fff; transition: transform .15s;
+}
+.card:hover { transform: translateY(-4px) rotate(-.5deg); }
+.card .ville { font-weight: 800; font-size: 1.15rem; display: flex; justify-content: space-between; align-items: center; }
+.card .emoji { font-size: 2.4rem; line-height: 1; }
+.card .temp { font-size: 1.7rem; font-weight: 800; color: #16406e; }
+.card .detail { font-size: .85rem; color: #55708c; font-weight: 600; }
+.meter { height: 12px; background: #e3edf6; border-radius: 8px; margin-top: 8px; overflow: hidden; }
+.meter > div { height: 100%; border-radius: 8px; }
+.card .score { font-size: .85rem; font-weight: 800; margin-top: 3px; }
+.badge-rank {
+  font-size: .75rem; background: #ffe9a8; border-radius: 10px; padding: 2px 8px;
+  font-weight: 800; color: #7a5b00;
+}
+
+/* podium */
+.podium { display: flex; align-items: flex-end; justify-content: center; gap: 12px; margin-top: 18px; }
+.step { text-align: center; width: 150px; }
+.step .box {
+  background: #ffffffee; border-radius: 18px 18px 0 0; border: 3px solid #fff;
+  box-shadow: 0 8px 20px rgba(0,0,0,.1); display: flex; flex-direction: column;
+  justify-content: center; padding: 8px;
+}
+.step .medaille { font-size: 2.2rem; }
+.step .nom { font-weight: 800; font-size: 1.1rem; }
+.step .sc { font-weight: 800; color: #6b4fae; }
+.step .socle { border-radius: 0 0 10px 10px; color: #fff; font-weight: 800; padding: 6px; }
+.p1 .box { height: 150px; } .p1 .socle { background: #f2b705; }
+.p2 .box { height: 115px; } .p2 .socle { background: #9fb3c8; }
+.p3 .box { height: 90px;  } .p3 .socle { background: #c77b30; }
+.ranking-rest { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 14px; }
+.chip {
+  background: #ffffffcc; padding: 5px 12px; border-radius: 14px; font-weight: 700;
+  font-size: .9rem; color: #33506e; border: 2px solid #fff;
+}
+
+/* carte de France */
+.map-wrap { position: relative; }
+.map-card {
+  height: 520px; border-radius: 22px; border: 3px solid #fff;
+  box-shadow: 0 10px 22px rgba(0,0,0,.12); z-index: 1;
+}
+.time-controls {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px;
+}
+.time-chip {
+  font-family: "Baloo 2", sans-serif; font-weight: 800; font-size: .95rem;
+  color: #33506e; background: #ffffffcc; border: 3px solid #fff;
+  border-radius: 16px; padding: 6px 14px; cursor: pointer;
+  box-shadow: 0 3px 8px rgba(0,0,0,.08);
+}
+.time-chip.active { background: #c62839; color: #fff; border-color: #ff8d9a; }
+.time-nav {
+  font-family: "Baloo 2", sans-serif; font-weight: 800; background: #ffffffcc;
+  border: 3px solid #fff; border-radius: 12px; padding: 5px 10px; cursor: pointer;
+  color: #33506e; box-shadow: 0 3px 8px rgba(0,0,0,.08);
+}
+#day-pick {
+  font-family: "Baloo 2", sans-serif; font-weight: 700; color: #33506e;
+  border: 3px solid #fff; border-radius: 12px; padding: 5px 8px;
+  background: #ffffffcc; box-shadow: 0 3px 8px rgba(0,0,0,.08);
+}
+#day-slider { flex: 1; min-width: 140px; accent-color: #2a78d6; }
+
+.layer-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.layer-chip {
+  font-family: "Baloo 2", sans-serif; font-weight: 800; font-size: .95rem;
+  color: #33506e; background: #ffffffcc; border: 3px solid #fff;
+  border-radius: 16px; padding: 6px 14px; cursor: pointer;
+  box-shadow: 0 3px 8px rgba(0,0,0,.08); transition: transform .1s;
+}
+.layer-chip:hover { transform: translateY(-2px); }
+.layer-chip.active { background: #14355c; color: #fff; border-color: #2a78d6; }
+.map-legend {
+  position: absolute; right: 14px; bottom: 14px; z-index: 999;
+  background: #ffffffee; border-radius: 12px; border: 2px solid #fff;
+  padding: 8px 12px; font-weight: 700; font-size: .8rem; color: #33506e;
+  box-shadow: 0 4px 10px rgba(0,0,0,.15); min-width: 150px;
+}
+.map-legend .bar { height: 10px; border-radius: 6px; margin: 4px 0 2px; }
+.map-legend .ends { display: flex; justify-content: space-between; }
+.city-marker { background: none; border: none; }
+.city-marker .pin {
+  display: flex; flex-direction: column; align-items: center;
+  transform: translateY(-6px); font-family: "Baloo 2", sans-serif;
+  filter: drop-shadow(0 3px 4px rgba(0,0,0,.25));
+}
+.city-marker .pin .wemoji { font-size: 30px; line-height: 1; }
+.city-marker .pin .pill {
+  background: #fff; border-radius: 12px; padding: 1px 8px; font-weight: 800;
+  font-size: .78rem; color: #14355c; border: 2px solid currentColor;
+  white-space: nowrap; margin-top: -2px;
+}
+.leaflet-popup-content-wrapper {
+  border-radius: 16px; font-family: "Baloo 2", sans-serif;
+}
+.leaflet-popup-content { margin: 12px 16px; font-weight: 600; color: #21324b; }
+.popup-title { font-weight: 800; font-size: 1.1rem; }
+.popup-meter { height: 10px; background: #e3edf6; border-radius: 6px; overflow: hidden; margin-top: 6px; width: 170px; }
+.popup-meter > div { height: 100%; }
+
+/* graphe */
+.chart-card {
+  background: #fcfcfb; border-radius: 22px; padding: 18px; border: 3px solid #fff;
+  box-shadow: 0 10px 22px rgba(0,0,0,.08); height: 380px;
+}
+
+/* épisodes */
+.episodes { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.episode {
+  background: #ffffffdd; border-radius: 16px; padding: 10px 14px; font-weight: 700;
+  border-left: 8px solid #2a78d6; display: flex; gap: 10px; align-items: center;
+  box-shadow: 0 4px 10px rgba(0,0,0,.06);
+}
+.episode.froid  { border-left-color: #2a78d6; }
+.episode.pluie  { border-left-color: #1baf7a; }
+.episode.vent   { border-left-color: #eb6834; }
+.episode .eico  { font-size: 1.5rem; }
+.episode .edet  { font-size: .85rem; color: #55708c; font-weight: 600; }
+
+footer {
+  position: relative; z-index: 1; text-align: center; padding: 18px;
+  color: #3c5a78; font-weight: 600; font-size: .85rem;
+}
+footer a { color: #2a78d6; }
+
+@media (max-width: 640px) {
+  .podium { gap: 6px; } .step { width: 31%; }
+}
